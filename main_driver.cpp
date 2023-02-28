@@ -79,7 +79,7 @@ static void run_standalone(int argc, char* argv[]){
 
     LOG("[driver] The library is set for a directed graph: " << (configuration().is_graph_directed() ? "yes" : "no"));
 
-    uint64_t random_vertex = numeric_limits<uint64_t>::max();
+    uint64_t random_vertex = 0; // 0 used for mixed workload
     int64_t num_validation_errors = -1; // -1 => no validation performed
     if(configuration().is_load()){
         auto impl_load = dynamic_pointer_cast<library::LoaderInterface>(impl);
