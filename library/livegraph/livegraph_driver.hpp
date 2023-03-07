@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include "library/interface.hpp"
+#include "third-party/livegraph/livegraph.hpp"
 
 namespace gfe::library {
 
@@ -43,7 +44,7 @@ protected:
     // Retrieve the internal vertex ID for the given external vertex. If the vertex does not exist, it raises an internal error
     uint64_t ext2int(uint64_t external_vertex_id) const;
 
-    // Retrieve the internal vertex ID for the given internal vertex ID. If the vertex does not exist, it returns uint64_t::max()
+    // // Retrieve the internal vertex ID for the given internal vertex ID. If the vertex does not exist, it returns uint64_t::max()
     uint64_t int2ext(void* transaction, uint64_t internal_vertex_id) const;
 
     // Helper for Graphalytics: translate the logical IDs into external IDs
@@ -65,6 +66,9 @@ public:
      * Destructor
      */
     virtual ~LiveGraphDriver();
+
+    // Retrieve the internal vertex ID for the given internal vertex ID. If the vertex does not exist, it returns uint64_t::max()
+    uint64_t int2ext_public(lg::Transaction& transaction, uint64_t internal_vertex_id) const;
 
     /**
      * Get the number of edges contained in the graph

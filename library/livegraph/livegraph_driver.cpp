@@ -125,6 +125,15 @@ uint64_t LiveGraphDriver::int2ext(void* opaque_transaction, uint64_t internal_ve
     }
 }
 
+uint64_t LiveGraphDriver::int2ext_public(lg::Transaction& transaction, uint64_t internal_vertex_id) const {
+    string_view payload = transaction.get_vertex(internal_vertex_id);
+    if(payload.empty()){ // the vertex does not exist
+        return numeric_limits<uint64_t>::max();
+    } else {
+        return *(reinterpret_cast<const uint64_t*>(payload.data()));
+    }
+}
+
 /*****************************************************************************
  *                                                                           *
  *  Updates                                                                  *
@@ -1362,6 +1371,7 @@ Triangle Counting
 #endif
 static
 uint32_t do_tc_undirected(lg::Transaction& transaction, uint64_t max_vertex_id, utility::TimeoutService& timer) {
+    
     uint32_t tc = 0;
     unique_ptr<uint32_t[]> ptr_degrees_out { new uint32_t[max_vertex_id] };
     uint32_t* __restrict degrees_out = ptr_degrees_out.get();
@@ -1420,7 +1430,7 @@ uint32_t do_tc_undirected(lg::Transaction& transaction, uint64_t max_vertex_id, 
             auto iterator2 = transaction.get_edges(u, /* label */ 0);
             while(iterator2.valid()){
                 uint64_t w = iterator2.dst_id();
-                if(w < v) {
+                if(w < u) {
                     iterator2.next();
                     continue;
                 } // skip vertex with smaller id
@@ -1445,6 +1455,94 @@ uint32_t do_tc_undirected(lg::Transaction& transaction, uint64_t max_vertex_id, 
     return tc;
 }
 
+uint32_t do_label_tc_undirected(lg::Transaction& transaction, uint64_t max_vertex_id, utility::TimeoutService& timer) {
+    uint32_t tc = 0;
+    unique_ptr<uint32_t[]> ptr_degrees_out { new uint32_t[max_vertex_id] };
+    uint32_t* __restrict degrees_out = ptr_degrees_out.get();
+    uint32_t LABEL_COUNT = 8;
+    uint32_t INTEREST_LABEL = 1;
+    LOG("In label TC");
+    // precompute the degrees of the vertices
+    #pragma omp parallel for schedule(dynamic, 4096)
+    for(uint64_t v = 0; v < max_vertex_id; v++){
+        bool vertex_exists = !transaction.get_vertex(v).empty();
+        if(vertex_exists){ // out degree, restrict the scope
+            uint32_t count = 0;
+            auto iterator = transaction.get_edges(v, 0);
+            while(iterator.valid()){ count ++; iterator.next(); }
+            degrees_out[v] = count; 
+        }
+    }
+
+    // LOG("In TC2");
+    // LOG(max_vertex_id);
+    #pragma omp parallel for reduction(+:tc) schedule(dynamic, 64)
+    for(uint64_t v = 0; v < max_vertex_id; v++){
+        uint64_t ext_v = int2ext_public(transaction, v);
+        if((degrees_out[v] == numeric_limits<uint32_t>::max()) || (ext_v % LABEL_COUNT != INTEREST_LABEL)) continue; // the vertex does not exist
+
+        // LOG("> Node " << v);
+        if(timer.is_timeout()) continue; // exhausted the budget of available time
+
+        uint64_t num_triangles = 0; // number of triangles found so far for the node v
+
+        // Cfr. Spec v.0.9.0 pp. 15: "If the number of neighbors of a vertex is less than two, its coefficient is defined as zero"
+        uint64_t v_degree_out = degrees_out[v];
+        if(v_degree_out < 2) continue;
+
+        // Build the list of neighbours of v
+        unordered_set<uint64_t> neighbours;
+
+        { // Fetch the list of neighbours of v
+            auto iterator1 = transaction.get_edges(v, 0);
+            while(iterator1.valid()){
+                uint64_t u = iterator1.dst_id();
+                neighbours.insert(u);
+                iterator1.next();
+            }
+        }
+        // LOG("> Node " << v << "Nbrs done");
+        // again, visit all neighbours of v
+        auto iterator1 = transaction.get_edges(v, /* label */ 0);
+        while(iterator1.valid()){
+            uint64_t u = iterator1.dst_id();
+            uint64_t ext_u = int2ext_public(transaction, u);
+            if((u < v) || (ext_u % LABEL_COUNT != INTEREST_LABEL)) {
+                iterator1.next();
+                continue;
+            } // skip vertex with smaller id or different label
+            COUT_DEBUG_TC("[" << i << "/" << edges.size() << "] neighbour: " << u);
+            assert(neighbours.count(u) == 1 && "The set `neighbours' should contain all neighbours of v");
+
+            auto iterator2 = transaction.get_edges(u, /* label */ 0);
+            while(iterator2.valid()){
+                uint64_t w = iterator2.dst_id();
+                uint64_t ext_w = int2ext_public(transaction, w);
+                if((w < u) || (ext_w % LABEL_COUNT != INTEREST_LABEL)) {
+                    iterator2.next();
+                    continue;
+                } // skip vertex with smaller id
+
+                COUT_DEBUG_TC("---> [" << j << "/" << /* degree */ (u_out_interval.second - u_out_interval.first) << "] neighbour: " << w);
+                // check whether it's also a neighbour of v
+                if(neighbours.count(w) == 1){
+                    // LOG("Triangle found " << v << " - " << u << " - " << w);
+                    num_triangles++;
+                }
+
+                iterator2.next();
+            }
+
+            iterator1.next();
+        }
+
+        tc += num_triangles;
+    }
+    
+    LOG("Labeled TC" << tc);
+    return tc;
+}
+
 void LiveGraphDriver::lcc(const char* dump2file) {
     LOG("In LCC");
     if(m_is_directed) { ERROR("Implementation of LCC supports only undirected graphs"); }
@@ -1456,7 +1554,7 @@ void LiveGraphDriver::lcc(const char* dump2file) {
 
     // Run the LCC algorithm
     LOG("In LCC-2");
-    uint32_t tc = do_tc_undirected(transaction, max_vertex_id, timeout);
+    uint32_t tc = do_label_tc_undirected(transaction, max_vertex_id, timeout);
     // if(timeout.is_timeout()){ transaction.abort(); RAISE_EXCEPTION(TimeoutError, "Timeout occurred after " << timer);  }
 
     transaction.abort(); // read-only transaction, abort == commit
