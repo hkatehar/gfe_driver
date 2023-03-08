@@ -187,6 +187,8 @@ public:
      * @param dump2file if not null, dump the result in the given path, following the format expected by the benchmark specification
      */
     virtual void sssp(uint64_t source_vertex_id, const char* dump2file = nullptr);
+
+    uint32_t do_label_tc_undirected(lg::Transaction& transaction, uint64_t max_vertex_id);
 };
 
 } // namespace

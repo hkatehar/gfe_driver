@@ -1455,7 +1455,7 @@ uint32_t do_tc_undirected(lg::Transaction& transaction, uint64_t max_vertex_id, 
     return tc;
 }
 
-uint32_t do_label_tc_undirected(lg::Transaction& transaction, uint64_t max_vertex_id, utility::TimeoutService& timer) {
+uint32_t LiveGraphDriver::do_label_tc_undirected(lg::Transaction& transaction, uint64_t max_vertex_id) {
     uint32_t tc = 0;
     unique_ptr<uint32_t[]> ptr_degrees_out { new uint32_t[max_vertex_id] };
     uint32_t* __restrict degrees_out = ptr_degrees_out.get();
@@ -1482,7 +1482,6 @@ uint32_t do_label_tc_undirected(lg::Transaction& transaction, uint64_t max_verte
         if((degrees_out[v] == numeric_limits<uint32_t>::max()) || (ext_v % LABEL_COUNT != INTEREST_LABEL)) continue; // the vertex does not exist
 
         // LOG("> Node " << v);
-        if(timer.is_timeout()) continue; // exhausted the budget of available time
 
         uint64_t num_triangles = 0; // number of triangles found so far for the node v
 
@@ -1554,7 +1553,7 @@ void LiveGraphDriver::lcc(const char* dump2file) {
 
     // Run the LCC algorithm
     LOG("In LCC-2");
-    uint32_t tc = do_label_tc_undirected(transaction, max_vertex_id, timeout);
+    uint32_t tc = do_label_tc_undirected(transaction, max_vertex_id);
     // if(timeout.is_timeout()){ transaction.abort(); RAISE_EXCEPTION(TimeoutError, "Timeout occurred after " << timer);  }
 
     transaction.abort(); // read-only transaction, abort == commit
